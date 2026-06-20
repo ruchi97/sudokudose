@@ -39,6 +39,10 @@ const App = () => {
   const [started, setStarted] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const [history, setHistory] = useState<number[][][]>([]);
+  const [selected, setSelected] = useState<{ row: number; col: number } | null>(
+    null
+  );
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -70,16 +74,19 @@ const App = () => {
   ) => {
     if (value === 0) return false;
 
+    const targetRow = board[row];
+    if (!targetRow) return false;
+
     // Check row
     for (let c = 0; c < 9; c++) {
-      if (c !== col && board[row][c] === value) {
+      if (c !== col && targetRow[c] === value) {
         return true;
       }
     }
 
     // Check column
     for (let r = 0; r < 9; r++) {
-      if (r !== row && board[r][col] === value) {
+      if (r !== row && board[r]?.[col] === value) {
         return true;
       }
     }
@@ -90,7 +97,7 @@ const App = () => {
 
     for (let r = boxRow; r < boxRow + 3; r++) {
       for (let c = boxCol; c < boxCol + 3; c++) {
-        if (r !== row && c !== col && board[r][c] === value) {
+        if (r !== row && c !== col && board[r]?.[c] === value) {
           return true;
         }
       }
@@ -102,7 +109,7 @@ const App = () => {
   const checkCompleted = (newBoard: number[][]) => {
     for (let row = 0; row < 9; row++) {
       for (let col = 0; col < 9; col++) {
-        if (newBoard[row][col] !== solution[row][col]) {
+        if (newBoard[row]?.[col] !== solution[row]?.[col]) {
           return false;
         }
       }
@@ -116,7 +123,7 @@ const App = () => {
     colIndex: number,
     value: string
   ) => {
-    if (initialBoard[rowIndex][colIndex] !== 0) return;
+    if (initialBoard[rowIndex]?.[colIndex] !== 0) return;
 
     if (!started) {
       setStarted(true);
@@ -128,8 +135,12 @@ const App = () => {
 
     const updatedBoard = board.map((row) => [...row]);
 
-    updatedBoard[rowIndex][colIndex] = value === '' ? 0 : Number(value);
+    const targetRow = updatedBoard[rowIndex];
+    if (!targetRow) return;
 
+    targetRow[colIndex] = value === '' ? 0 : Number(value);
+
+    setHistory((prev) => [...prev, board.map((row) => [...row])]);
     setBoard(updatedBoard);
 
     if (checkCompleted(updatedBoard)) {
@@ -137,11 +148,23 @@ const App = () => {
     }
   };
 
+  const undoMove = () => {
+    if (history.length === 0) return;
+
+    const previousBoard = history[history.length - 1]!;
+
+    setHistory((prev) => prev.slice(0, -1));
+    setBoard(previousBoard.map((row) => [...row]));
+    setCompleted(false);
+  };
+
   const resetGame = () => {
     setBoard(initialBoard.map((row) => [...row]));
     setStarted(false);
     setCompleted(false);
     setSeconds(0);
+    setHistory([]);
+    setSelected(null);
   };
 
   const statusMessage = useMemo(() => {
@@ -168,10 +191,27 @@ const App = () => {
         {statusMessage}
       </div>
 
-      <div className="grid grid-cols-9 border-4 border-black bg-white">
+      <div className="flex gap-3 mb-6">
+        <button
+          onClick={undoMove}
+          disabled={history.length === 0 || completed}
+          className="px-6 py-3 bg-gray-600 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors"
+        >
+          ↩ Undo
+        </button>
+
+        <button
+          onClick={resetGame}
+          className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-semibold transition-colors"
+        >
+          Reset Game
+        </button>
+      </div>
+
+      <div className="grid grid-cols-9 aspect-square w-full max-w-[min(90vw,480px)] border-4 border-black bg-white">
         {board.map((row, rowIndex) =>
           row.map((cell, colIndex) => {
-            const isFixed = initialBoard[rowIndex][colIndex] !== 0;
+            const isFixed = initialBoard[rowIndex]?.[colIndex] !== 0;
 
             const hasConflict = isConflict(
               board,
@@ -179,6 +219,33 @@ const App = () => {
               colIndex,
               cell
             );
+
+            const isSelected =
+              selected?.row === rowIndex && selected?.col === colIndex;
+
+            const inSameRow = selected?.row === rowIndex;
+            const inSameCol = selected?.col === colIndex;
+            const inSameBox =
+              selected != null &&
+              Math.floor(selected.row / 3) === Math.floor(rowIndex / 3) &&
+              Math.floor(selected.col / 3) === Math.floor(colIndex / 3);
+
+            const isHighlighted =
+              !isSelected && (inSameRow || inSameCol || inSameBox);
+
+            const background = isFixed
+              ? isSelected
+                ? 'bg-orange-200 text-black font-bold'
+                : isHighlighted
+                ? 'bg-orange-50 text-black font-bold'
+                : 'bg-gray-200 text-black font-bold'
+              : hasConflict
+              ? 'bg-red-200 text-red-900'
+              : isSelected
+              ? 'bg-orange-200 text-black'
+              : isHighlighted
+              ? 'bg-orange-50 text-black'
+              : 'bg-white text-black';
 
             return (
               <input
@@ -190,18 +257,14 @@ const App = () => {
                 onChange={(e) =>
                   handleChange(rowIndex, colIndex, e.target.value)
                 }
+                onFocus={() => setSelected({ row: rowIndex, col: colIndex })}
                 disabled={completed || isFixed}
                 className={`
-                  w-12 h-12 text-center text-xl border border-gray-400
+                  aspect-square w-full min-w-0 text-center text-lg sm:text-xl
+                  border border-gray-400 box-border
                   focus:outline-none
                   transition-colors
-                  ${
-                    isFixed
-                      ? 'bg-gray-200 text-black font-bold'
-                      : hasConflict
-                      ? 'bg-red-200 text-red-900'
-                      : 'bg-white text-black focus:bg-orange-100'
-                  }
+                  ${background}
                   ${
                     colIndex % 3 === 2 && colIndex !== 8
                       ? 'border-r-4 border-r-black'
@@ -222,13 +285,6 @@ const App = () => {
       <div className="mt-4 text-sm text-red-600 font-medium">
         Red cells contain duplicate numbers in a row, column, or box.
       </div>
-
-      <button
-        onClick={resetGame}
-        className="mt-6 px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-semibold transition-colors"
-      >
-        Reset Game
-      </button>
     </div>
   );
 };
